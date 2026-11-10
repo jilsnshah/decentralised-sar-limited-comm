@@ -1,0 +1,48 @@
+% Minimal re-implementation of the "arxiv" preprint style used for the
+% project-review report (title between two rules, small-caps title,
+% running header).
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{arxiv}[2026/11/10 arxiv-like preprint style]
+
+\RequirePackage[letterpaper,margin=1in]{geometry}
+\RequirePackage{fancyhdr}
+\RequirePackage{times}
+
+\newcommand{\headeright}{}
+\newcommand{\undertitle}{}
+\newcommand{\shorttitle}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyhead[L]{\small\shorttitle}
+\fancyfoot[C]{\thepage}
+\fancypagestyle{plain}{\fancyhf{}\renewcommand{\headrulewidth}{0pt}\fancyfoot[C]{\thepage}}
+
+\setlength{\parindent}{1em}
+\setlength{\parskip}{0pt}
+
+\newcommand{\@toptitlebar}{\hrule height 2pt \vskip 0.25in \vskip -\parskip}
+\newcommand{\@bottomtitlebar}{\vskip 0.22in \vskip -\parskip \hrule height 2pt \vskip 0.09in}
+
+\renewcommand{\@maketitle}{%
+  \vbox{%
+    \hsize\textwidth \linewidth\hsize \vskip 0.1in
+    \@toptitlebar
+    \centering {\LARGE\scshape \@title\par}
+    \@bottomtitlebar
+    \vskip 0.25in
+    \def\And{\end{tabular}\hfil\linebreak[0]\hfil
+      \begin{tabular}[t]{c}\bf\rule{\z@}{24pt}\ignorespaces}%
+    \def\AND{\end{tabular}\hfil\linebreak[4]\hfil
+      \begin{tabular}[t]{c}\bf\rule{\z@}{24pt}\ignorespaces}%
+    \begin{tabular}[t]{c}\bf\rule{\z@}{24pt}\@author\end{tabular}%
+    \vskip 0.25in \@minus 0.1in
+  }%
+}
+
+\renewenvironment{abstract}{%
+  \centerline{\large\scshape Abstract}\vspace{0.5ex}%
+  \begin{quote}\small}{\par\end{quote}\vskip 0.5ex}
+
+\newcommand{\keywords}[1]{\noindent\small\textbf{\textit{Keywords}} #1}

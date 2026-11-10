@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.synctex.gz
+/Multi_Agent_Systems_Project_Guidelines.docx.pdf
+/project_idea_review.pdf
