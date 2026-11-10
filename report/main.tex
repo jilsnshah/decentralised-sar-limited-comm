@@ -157,7 +157,7 @@ allocation is solved.
 structure), random debris obstacles (density 0.08) and hazard cells (density 0.06). The exit lies on the left wall; the
 victim is placed uniformly among robot-reachable cells at least $0.6n$ steps from the exit. Drones fly over hazards but
 not through walls; robots may not enter hazards. All-pairs shortest-path distances for both movement models are
-pre-computed with BFS, and agents move along shortest paths (drones 2 cells/step, robots 1 cell/step). The floor plan is
+pre-computed with BFS; all agents enter at the exit and move along shortest paths (drones 2 cells/step, robots 1 cell/step). The floor plan is
 known (from blueprints); the victim location is not.
 \textbf{Sensing and belief.} Drones scan a $5\times5$ window ($\rho=2$), robots a $3\times3$ window ($\rho=1$), with the
 reliability presets of Table~\ref{tab:params}. Each agent keeps a posterior $b_i(v)=\Pr(v^\star=v\mid\text{evidence})$,
@@ -391,7 +391,7 @@ matters (71--75 steps), i.e.\ once the budget is binding it, not connectivity, i
 
 \subsection{Discussion and limitations}
 Answering the research question: in this setting the value of communication is concentrated in a few messages that
-carry the drone-to-robot handoff; the B=0 ablation shows that complementary agent types are almost useless without
+carry the drone-to-robot handoff; the $B=0$ ablation shows that complementary agent types are almost useless without
 it (drones find the victim at step 25 on average but robots only learn it at step 71). Further budget mainly buys less
 redundant exploration and better coordination, and the decentralised team then stays within 10\% of a centralised
 coordinator using less than half of its messages. Limitations: the floor plan is known and static; a single victim
