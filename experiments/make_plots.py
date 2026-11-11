@@ -81,16 +81,17 @@ def fig_main():
               ("comm", "messages used $C_{comm}$"), ("dup_steps", "steps violating constraint (2)")]
     fig, axes = plt.subplots(2, 3, figsize=(7.2, 4.3))
     for ax, (col, title) in zip(axes.ravel(), panels):
-        budget_curve(ax, df[df.method == "dcop"], col, BLUE, "DCOP (MGM)")
-        budget_curve(ax, df[df.method == "dcop-nomgm"], col, ORANGE, "no-MGM ablation", "s")
+        budget_curve(ax, df[df.method == "mgm"], col, BLUE, "DCOP: MGM")
+        budget_curve(ax, df[df.method == "dsa"], col, AQUA, "DCOP: DSA-C", "^")
+        budget_curve(ax, df[df.method == "nocoord"], col, ORANGE, "no coordination msgs", "s")
         ref_line(ax, cen, col)
         ax.set_title(title)
         budget_axis(ax)
-    axes[0, 0].set_ylim(0.7, 1.02)
+    axes[0, 0].set_ylim(top=1.02)
     for ax in axes[0]:
         ax.set_xlabel("")
     h, l = axes[0, 0].get_legend_handles_labels()
-    fig.legend(h, l, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.03))
+    fig.legend(h, l, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.03))
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(os.path.join(FIG, "budget_main.png"))
     plt.close(fig)
@@ -103,7 +104,7 @@ def fig_reliability():
     for rel, c in cols.items():
         d = df[df.reliability == rel]
         for ax, col in zip(axes, ("success", "T", "false_trips")):
-            budget_curve(ax, d[d.method == "dcop"], col, c, f"{rel} reliability")
+            budget_curve(ax, d[d.method == "mgm"], col, c, f"{rel} reliability")
             ref_line(ax, d[d.method == "central"], col, color=c, label=None, ls=":")
     for ax, t in zip(axes, ("success rate", "$T_{rescue}$ (all runs, cap 150)", "robot trips to false claims")):
         ax.set_title(t)
@@ -122,7 +123,7 @@ def grouped_bars(ax, df, key, levels, col):
     for k, lev in enumerate(levels):
         d = df[df[key] == lev]
         for j, (b, c) in enumerate(zip(budgets, colors)):
-            m, ci = mean_ci(metric(d[(d.method == "dcop") & (d.budget == b)], col))
+            m, ci = mean_ci(metric(d[(d.method == "mgm") & (d.budget == b)], col))
             ax.bar(k + (j - 1.5) * w - 0.08, m, w * 0.88, yerr=ci, color=c,
                    label=names[j] if k == 0 else None, error_kw={"lw": 0.8, "ecolor": INK2})
         m, ci = mean_ci(metric(d[d.method == "central"], col))
@@ -174,9 +175,26 @@ def fig_range():
     plt.close(fig)
 
 
+def fig_map():
+    df = load("map")
+    fig, axes = plt.subplots(1, 3, figsize=(6.2, 2.2))
+    lv = ["known", "unknown"]
+    for ax, col, t in zip(axes, ("success", "T", "move"),
+                          ("success", "$T_{rescue}$", "movement cost")):
+        grouped_bars(ax, df, "map", lv, col)
+        ax.set_xticklabels(["known map", "unknown map"])
+        ax.set_title(t)
+    axes[0].set_ylim(0, 1.05)
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="upper center", ncol=5, bbox_to_anchor=(0.5, 1.1))
+    fig.tight_layout()
+    fig.savefig(os.path.join(FIG, "map_knowledge.png"))
+    plt.close(fig)
+
+
 def fig_tradeoff():
     df = load("main")
-    d = df[df.method == "dcop"]
+    d = df[df.method == "mgm"]
     fig, ax = plt.subplots(figsize=(3.4, 2.4))
     xs, ys = [], []
     for b in BUDGET_ORDER:
@@ -186,7 +204,7 @@ def fig_tradeoff():
         if b in (320, -1):
             continue
         ax.annotate("160, 320, ∞" if b == 160 else BLAB[b], (x, y), textcoords="offset points", xytext=(4, 3), fontsize=7, color=INK2)
-    ax.plot(xs, ys, marker="o", color=BLUE, label="DCOP")
+    ax.plot(xs, ys, marker="o", color=BLUE, label="DCOP (MGM)")
     c = df[df.method == "central"]
     ax.scatter([c.comm.mean()], [c.J.mean() - 0.1 * c.comm.mean()], color=INK, marker="D", s=22,
                label="centralised", zorder=3)
@@ -206,12 +224,15 @@ def fmt(m, c, nd=2):
 def table_main():
     df = load("main")
     rows = []
-    for meth, lab in (("central", "Centralised"), ("dcop", "DCOP (MGM)"), ("dcop-nomgm", "No-MGM")):
+    spec = (("central", "Centralised", [-1]),
+            ("mgm", "DCOP: MGM", [0, 10, 20, 40, 80, -1]),
+            ("dsa", "DCOP: DSA-C", [10, 40, -1]),
+            ("nocoord", "No coordination", [10, 40, -1]))
+    for meth, lab, budgets in spec:
         d = df[df.method == meth]
-        budgets = [-1] if meth == "central" else [0, 10, 20, 40, 80, -1]
-        for b in budgets:
+        for i, b in enumerate(budgets):
             s = d[d.budget == b]
-            r = [lab if b in (-1, 0) and (meth == "central" or b == 0) else "",
+            r = [lab if i == 0 else "",
                  "--" if meth == "central" else BLAB[b].replace("∞", "$\\infty$")]
             r.append(fmt(*mean_ci(s.success)))
             r.append(fmt(*mean_ci(s.loc[s.success == 1, "T"]), 1))
@@ -232,7 +253,7 @@ def table_reliability():
     for rel in ("high", "medium", "low"):
         d = df[df.reliability == rel]
         c = d[d.method == "central"]
-        g = lambda b, col: d[(d.method == "dcop") & (d.budget == b)][col].mean()  # noqa: E731
+        g = lambda b, col: d[(d.method == "mgm") & (d.budget == b)][col].mean()  # noqa: E731
         lines.append(" & ".join([
             rel, f"{c.success.mean():.2f}", f"{g(-1, 'success'):.2f}", f"{g(20, 'success'):.2f}",
             f"{g(0, 'success'):.2f}", f"{c['T'].mean():.1f}", f"{g(-1, 'T'):.1f}", f"{g(20, 'T'):.1f}",
@@ -243,9 +264,9 @@ def table_reliability():
 
 def summary_txt():
     out = []
-    for name in ("main", "reliability", "team", "complexity", "range"):
+    for name in ("main", "reliability", "team", "complexity", "range", "map"):
         df = load(name)
-        keys = [k for k in ("reliability", "team", "complexity", "comm_range") if k in df]
+        keys = [k for k in ("reliability", "team", "complexity", "comm_range", "map") if k in df]
         g = df.groupby(keys + ["method", "budget"])
         cols = ["success", "T", "comm", "move", "t_detect", "t_handoff", "dup_steps",
                 "wrong_claims", "false_trips", "redundancy", "J"]
@@ -255,6 +276,6 @@ def summary_txt():
 
 
 if __name__ == "__main__":
-    fig_main(); fig_reliability(); fig_team_complexity(); fig_range(); fig_tradeoff()
+    fig_main(); fig_reliability(); fig_team_complexity(); fig_range(); fig_tradeoff(); fig_map()
     table_main(); table_reliability(); summary_txt()
     print("figures ->", FIG)

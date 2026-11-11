@@ -5,7 +5,11 @@ method = "central": one coordinator pools every observation for free (every
                     Hungarian method and routes agents.
 method = "dcop":    every agent keeps its own belief, communicates by
                     range-limited broadcasts charged against its share of the
-                    team budget B, and allocates tasks with MGM.
+                    team budget B, and allocates tasks with MGM (or DSA-C).
+
+Unless cfg.known_map is set, the floor plan itself is unknown: agents learn
+the terrain inside their sensing radius, plan optimistically through unknown
+cells, and share discovered terrain inside their observation messages.
 """
 import math
 from collections import Counter
@@ -14,9 +18,10 @@ import numpy as np
 from scipy.ndimage import uniform_filter
 
 from .agent import Agent, Belief
-from .allocation import (IDLE, RESCUE, best_response, hungarian, local_cost,
-                         unary_costs)
-from .env import Building
+from .allocation import (IDLE, RESCUE, best_response, conflicted, hungarian,
+                         local_cost, unary_costs)
+from .env import FREE, Building
+from .mapknow import MapKnowledge, truly_passable
 
 CARRY = ("carry",)
 DELIVER = ("deliver",)
@@ -28,20 +33,34 @@ class Simulation:
         self.cfg, self.seed, self.method = cfg, seed, method
         self.b = Building(cfg, seed)
         self.rng = np.random.default_rng([seed, 12345])
+        self.alloc_rng = np.random.default_rng([seed, 999])
+        # victim prior: with a known floor plan the agents can exclude cells a
+        # robot cannot reach; otherwise every cell is possible until revealed
+        n = self.b.n
+        prior = self.b.prior_mask if cfg.known_map else np.ones((n, n), bool)
         self.agents = []
         for i in range(cfg.n_agents):
             kind = "drone" if i < cfg.n_drones else "robot"
-            a = Agent(i, kind, self.b.start_cells[i], cfg, self.b.prior_mask)
+            a = Agent(i, kind, self.b.start_cells[i], cfg, prior)
             a.reserve_level = min(cfg.reserve, a.quota)
+            a.terrain_out = []
             self.agents.append(a)
         for a in self.agents:
             for r in self.robots:
                 a.known_robot_pos[r.id] = r.pos
         if method == "central":
-            self.central = Belief(self.b.prior_mask)
+            self.central = Belief(prior)
+            self.cmap = MapKnowledge(self.b, cfg.known_map)
             for a in self.agents:
                 a.quota = math.inf
                 a.reserve_level = 0
+                a.map = self.cmap
+        else:
+            for a in self.agents:
+                a.map = MapKnowledge(self.b, cfg.known_map)
+        for a in self.agents:  # initial look around the entrance
+            ys, xs = self.window(a)
+            self.learn_terrain(a, a.map.reveal(ys, xs, self.b.grid))
         self.t = 0
         self.comm = 0
         self.msgs = Counter()
@@ -66,6 +85,29 @@ class Simulation:
         if self.method == "central":
             return self._central_prob
         return a._prob
+
+    def window(self, a):
+        n, (y, x), r = self.b.n, a.pos, a.radius
+        ys, xs = np.mgrid[max(0, y - r): min(n, y + r + 1), max(0, x - r): min(n, x + r + 1)]
+        return ys.ravel(), xs.ravel()
+
+    def learn_terrain(self, a, new):
+        """Cells newly revealed to agent a: the victim cannot be in an
+        obstacle or hazard; in the decentralised case the discovery is queued
+        for sharing."""
+        if not new:
+            return
+        blocked = [(y, x) for y, x, v in new if v != FREE]
+        if self.method == "central":
+            if blocked:
+                self.central.clear(blocked)
+        else:
+            if blocked:
+                a.belief.clear(blocked)
+            a.terrain_out.extend(new)
+
+    def dist(self, a):
+        return a.map.plan(a.pos, a.kind)[0]
 
     def in_range(self, a, b):
         return math.dist(a.pos, b.pos) <= self.cfg.comm_range
@@ -99,6 +141,11 @@ class Simulation:
             return
         for ys, xs, z, pd, pf in p.get("obs", ()):
             r.belief.update(ys, xs, z, pd, pf)
+        if p.get("terrain"):
+            r.map.merge(p["terrain"])
+            blocked = [(y, x) for y, x, v in p["terrain"] if v != FREE]
+            if blocked:
+                r.belief.clear(blocked)
         if p.get("cleared"):
             r.belief.clear(p["cleared"])
             cl = set(p["cleared"])
@@ -116,12 +163,13 @@ class Simulation:
             r.rescued = True
 
     def flush_obs(self, a, urgent=False, extra=None):
-        payload = {"obs": a.outbox, "cleared": a.cleared, "task": a.task, "claim": a.own_claim}
+        payload = {"obs": a.outbox, "cleared": a.cleared, "task": a.task,
+                   "claim": a.own_claim, "terrain": a.terrain_out}
         if extra:
             payload.update(extra)
         rec = self.broadcast(a, "OBS", payload, urgent)
         if rec is not None:
-            a.outbox, a.cleared = [], []
+            a.outbox, a.cleared, a.terrain_out = [], [], []
             a.last_claim_sent = a.own_claim
         return rec
 
@@ -154,14 +202,14 @@ class Simulation:
             return a.claim[0]
         if task == DELIVER:
             known = list(a.known_robot_pos.values())
-            D = self.b.dist["drone"][self.b.cid(a.pos)]
-            return min(known, key=lambda p: D[self.b.cid(p)])
+            D = self.dist(a)
+            return min(known, key=lambda p: D[p])
         if task is None or task[0] != "search":
             return a.pos
         cells = self.b.region_cells[task[1]]
         w = 2 * a.radius + 1
         S = uniform_filter(prob, size=w, mode="constant") * w * w
-        D = self.b.dist[a.kind][self.b.cid(a.pos)].reshape(self.b.n, self.b.n)
+        D = self.dist(a)
         ok = cells & np.isfinite(D)
         if not ok.any():
             return a.pos
@@ -192,7 +240,7 @@ class Simulation:
                 a.task = f
                 continue
             free.append(a)
-            costs.append(unary_costs(a, self.b, self.cfg, self._central_prob, a.claim))
+            costs.append(unary_costs(a, self.b, self.cfg, self._central_prob, a.claim, self.dist(a)))
         if free:
             assign = hungarian(free, costs)
             for a in free:
@@ -209,7 +257,7 @@ class Simulation:
             if f is not None:
                 a.task = f
                 continue
-            a.unary = unary_costs(a, self.b, cfg, a._prob, a.claim)
+            a.unary = unary_costs(a, self.b, cfg, a._prob, a.claim, self.dist(a))
             if a.task not in a.unary:
                 a.task, _ = best_response(a, a.unary, t, cfg)
             active.append(a)
@@ -219,18 +267,33 @@ class Simulation:
                 if a.claim_event:
                     a.task, _ = best_response(a, a.unary, t, cfg)
             return
-        if cfg.mgm_rounds == 0:
+        if cfg.solver == "none" or cfg.rounds == 0:
             # ablation: no coordination messages, independent best responses
             # using whatever task information was piggybacked on OBS messages
             for a in active:
                 a.task, _ = best_response(a, a.unary, t, cfg)
             return
-        for _ in range(cfg.mgm_rounds):
+        for _ in range(cfg.rounds):
             # VALUE phase: announce current assignment (if changed or stale)
             for a in active:
                 if a.task != a.announced or t - a.announced_t >= cfg.view_ttl:
                     if self.broadcast(a, "VALUE", {"task": a.task}) is not None:
                         a.announced, a.announced_t = a.task, t
+            if cfg.solver == "dsa":
+                # DSA-C: move to the best response with probability p if it
+                # strictly improves, or if it keeps the cost while the current
+                # value is in conflict. No gain messages are exchanged.
+                changed = False
+                for a in active:
+                    best, bc = best_response(a, a.unary, t, cfg)
+                    cur = local_cost(a.task, a.unary, a.view, a.id, t, cfg)
+                    gain = cur - bc
+                    move = gain > 1e-9 or (abs(gain) <= 1e-9 and best != a.task
+                                           and conflicted(a.task, a.view, a.id, t, cfg))
+                    if move and self.alloc_rng.random() < cfg.dsa_p:
+                        a.task = best
+                        changed = True
+                continue
             # GAIN phase
             for a in active:
                 a.gains_heard = {}
@@ -299,9 +362,12 @@ class Simulation:
         for a in self.agents:
             prob = self.prob_of(a)
             a.target = self.choose_target(a, prob)
-            for _ in range(a.speed):
-                nxt = b.step_towards(a.pos, a.target, a.kind)
-                if nxt == a.pos:
+            path = a.map.path(a.pos, a.target, a.kind)
+            for nxt in path[: a.speed]:
+                if not truly_passable(b, nxt, a.kind):
+                    # bumped into terrain that was not known yet
+                    new = a.map.reveal(np.array([nxt[0]]), np.array([nxt[1]]), b.grid)
+                    self.learn_terrain(a, new)
                     break
                 a.pos = nxt
                 self.move += 1
@@ -309,6 +375,7 @@ class Simulation:
         # 4. sensing, physical contact, rescue
         for a in self.agents:
             ys, xs, z = a.scan(b, self.rng)
+            self.learn_terrain(a, a.map.reveal(ys, xs, b.grid))
             self.scanned_by[ys, xs] |= (1 << a.id)
             if self.method == "central":
                 self.central.update(ys, xs, z, a.p_det, a.p_fa)
@@ -372,10 +439,10 @@ class Simulation:
             if not sent and a.task == DELIVER and a.claim is not None:
                 if any(not r.is_drone and self.in_range(a, r) for r in self.agents):
                     payload = {"task": a.task, "claim": a.claim, "obs": a.outbox,
-                               "cleared": a.cleared}
+                               "cleared": a.cleared, "terrain": a.terrain_out}
                     rec = self.broadcast(a, "OBS", payload, urgent=True)
                     if rec is not None:
-                        a.outbox, a.cleared = [], []
+                        a.outbox, a.cleared, a.terrain_out = [], [], []
                         a.delivered_cells.add(a.claim[0])
                         sent = True
             # (iii) relay a newly heard claim once
@@ -402,6 +469,7 @@ class Simulation:
             "prob": (self._central_prob if self.method == "central" else self.agents[0]._prob).copy(),
             "carrying": [a.carrying for a in self.agents],
             "comm": self.comm,
+            "known": self.agents[0].map.grid.copy(),
         })
 
     def run(self):
@@ -415,6 +483,9 @@ class Simulation:
         scanned = self.scanned_by > 0
         multi = np.array([bin(int(v)).count("1") >= 2 for v in self.scanned_by.ravel()])
         redundancy = multi.sum() / max(1, scanned.sum())
+        known = np.zeros((self.b.n, self.b.n), bool)
+        for a in self.agents:
+            known |= a.map.grid >= 0
         J = (cfg.lam_t * T + cfg.lam_c * self.comm + cfg.lam_m * self.move
              + cfg.lam_f * (1 - int(self.success)))
         return {
@@ -428,6 +499,7 @@ class Simulation:
             "dup_steps": self.dup_steps, "dup_pairs": self.dup_pairs,
             "false_trips": self.false_trips, "wrong_claims": self.wrong_claims,
             "redundancy": redundancy,
+            "explored": float(known.mean()),
             "msg_obs": self.msgs["OBS"], "msg_value": self.msgs["VALUE"],
             "msg_gain": self.msgs["GAIN"], "msg_assign": self.msgs["ASSIGN"],
             "max_agent_sent": max(a.sent for a in self.agents),

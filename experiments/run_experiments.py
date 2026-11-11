@@ -23,8 +23,9 @@ def jobs_main(seeds):
     for s in seeds:
         yield ("main", {}, "central", BASE, s)
         for B in BUDGETS:
-            yield ("main", {}, "dcop", BASE.with_(budget=B), s)
-            yield ("main", {}, "dcop-nomgm", BASE.with_(budget=B, mgm_rounds=0), s)
+            yield ("main", {}, "mgm", BASE.with_(budget=B), s)
+            yield ("main", {}, "dsa", BASE.with_(budget=B, solver="dsa"), s)
+            yield ("main", {}, "nocoord", BASE.with_(budget=B, solver="none"), s)
 
 
 def jobs_reliability(seeds):
@@ -33,7 +34,7 @@ def jobs_reliability(seeds):
         for s in seeds:
             yield ("reliability", {"reliability": rel}, "central", c, s)
             for B in BUDGETS:
-                yield ("reliability", {"reliability": rel}, "dcop", c.with_(budget=B), s)
+                yield ("reliability", {"reliability": rel}, "mgm", c.with_(budget=B), s)
 
 
 def jobs_team(seeds):
@@ -43,7 +44,7 @@ def jobs_team(seeds):
         for s in seeds:
             yield ("team", tag, "central", c, s)
             for B in COARSE:
-                yield ("team", tag, "dcop", c.with_(budget=B), s)
+                yield ("team", tag, "mgm", c.with_(budget=B), s)
 
 
 def jobs_complexity(seeds):
@@ -52,14 +53,24 @@ def jobs_complexity(seeds):
         for s in seeds:
             yield ("complexity", {"complexity": lvl}, "central", c, s)
             for B in COARSE:
-                yield ("complexity", {"complexity": lvl}, "dcop", c.with_(budget=B), s)
+                yield ("complexity", {"complexity": lvl}, "mgm", c.with_(budget=B), s)
 
 
 def jobs_range(seeds):
     for R in (4.0, 6.0, 9.0, 14.0, 100.0):
         for s in seeds:
             for B in (40, None):
-                yield ("range", {"comm_range": R}, "dcop", BASE.with_(budget=B, comm_range=R), s)
+                yield ("range", {"comm_range": R}, "mgm", BASE.with_(budget=B, comm_range=R), s)
+
+
+def jobs_map(seeds):
+    for known in (True, False):
+        c = BASE.with_(known_map=known)
+        tag = {"map": "known" if known else "unknown"}
+        for s in seeds:
+            yield ("map", tag, "central", c, s)
+            for B in COARSE:
+                yield ("map", tag, "mgm", c.with_(budget=B), s)
 
 
 EXPERIMENTS = {
@@ -68,6 +79,7 @@ EXPERIMENTS = {
     "team": jobs_team,
     "complexity": jobs_complexity,
     "range": jobs_range,
+    "map": jobs_map,
 }
 
 

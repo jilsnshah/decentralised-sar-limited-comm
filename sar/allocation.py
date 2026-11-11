@@ -32,11 +32,10 @@ def region_masses(building, prob):
     return np.array([prob[m].sum() for m in building.region_cells])
 
 
-def unary_costs(agent, building, cfg, prob, claim):
-    """u_i(task) for every task in agent's domain, given a belief `prob` and an
-    optional victim claim (cell, confidence). Returns dict task -> cost."""
-    D = building.dist[agent.kind]
-    row = D[building.cid(agent.pos)].reshape(building.n, building.n)
+def unary_costs(agent, building, cfg, prob, claim, row):
+    """u_i(task) for every task in agent's domain, given a belief `prob`, an
+    optional victim claim (cell, confidence) and the agent's shortest-path
+    distances `row` (n x n) on its believed map. Returns dict task -> cost."""
     masses = region_masses(building, prob)
     q = agent.p_det * ((2 * agent.radius + 1) ** 2) / 25.0  # scanning efficiency
     costs = {IDLE: 0.0}
@@ -86,6 +85,12 @@ def local_cost(task, unary, view, me, t, cfg):
         if j != me and t - seen <= cfg.view_ttl:
             c += pair_cost(task, tj, cfg)
     return c
+
+
+def conflicted(task, view, me, t, cfg):
+    """True if a fresh neighbour value collides with `task` (DSA-C rule)."""
+    return task != IDLE and any(j != me and tj == task and t - seen <= cfg.view_ttl
+                                for j, (tj, seen) in view.items())
 
 
 def best_response(agent, unary, t, cfg):

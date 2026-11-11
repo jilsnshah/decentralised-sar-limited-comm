@@ -1,5 +1,6 @@
-main: 5100 episodes in 32.9s -> ./results/main.csv
-reliability: 8100 episodes in 57.2s -> ./results/reliability.csv
-team: 4500 episodes in 38.0s -> ./results/team.csv
-complexity: 4500 episodes in 47.0s -> ./results/complexity.csv
-range: 3000 episodes in 25.4s -> ./results/range.csv
+main: 7500 episodes in 169.9s -> ./results/main.csv
+reliability: 8100 episodes in 191.3s -> ./results/reliability.csv
+team: 4500 episodes in 110.0s -> ./results/team.csv
+complexity: 4500 episodes in 145.4s -> ./results/complexity.csv
+range: 3000 episodes in 79.4s -> ./results/range.csv
+map: 3000 episodes in 73.6s -> ./results/map.csv

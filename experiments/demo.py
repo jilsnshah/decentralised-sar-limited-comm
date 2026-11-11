@@ -30,6 +30,8 @@ def draw(ax, sim, frame, title):
     ov = np.zeros((b.n, b.n, 4))
     ov[b.grid == OBSTACLE] = (0.15, 0.15, 0.15, 1)
     ov[b.grid == HAZARD] = (0.89, 0.29, 0.28, 0.55)
+    unk = frame["known"] < 0
+    ov[unk] = (0.80, 0.80, 0.78, 0.85)       # not yet discovered by d0 / coordinator
     ax.imshow(ov, origin="upper")
     ax.add_patch(plt.Rectangle((b.exit[1] - .5, b.exit[0] - .5), 1, 1, color="#1baf7a"))
     ax.text(b.exit[1], b.exit[0], "E", ha="center", va="center", fontsize=7, color="white", weight="bold")

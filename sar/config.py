@@ -28,6 +28,7 @@ class Config:
     obstacle_density: float = 0.08
     hazard_density: float = 0.06
     n_walls: int = 3
+    known_map: bool = False           # False: floor plan discovered by sensing
     # team
     n_drones: int = 3
     n_robots: int = 2
@@ -43,8 +44,10 @@ class Config:
     reserve: int = 2                  # per-agent quota reserved for victim claims
     # allocation
     regions: Tuple[int, int] = (4, 4)  # search-region partition (rows, cols)
+    solver: str = "mgm"               # decentralised solver: "mgm" | "dsa" | "none"
     replan_period: int = 5
-    mgm_rounds: int = 3
+    rounds: int = 3                   # DCOP rounds per allocation epoch
+    dsa_p: float = 0.7                # DSA-C activation probability
     view_ttl: int = 15                # staleness limit for neighbours' task info
     w_info: float = 400.0             # weight on searchable belief mass
     w_rescue: float = 1000.0          # weight on rescuing a claimed victim
